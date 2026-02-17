@@ -7,7 +7,7 @@
 normalize_data(corrected_data, method = "tsn")
 }
 \arguments{
-\item{corrected_data}{matrix of QC-corrected mass spec values with metabolites on the rows and one column per sample.}
+\item{corrected_data}{A data frame of corrected metabolite values as returned by \code{qc_drift_correction()}.}
 
 \item{method}{The scaling method: "tsn" (Total Sum Normalization, default) or "auto" (Autoscaling).}
 }
@@ -15,5 +15,5 @@ normalize_data(corrected_data, method = "tsn")
 The scaled data frame.
 }
 \description{
-Applies a scaling method (e.g., Total Sum Normalization) to metabolite values.
+Applies a scaling method (i.e. total sum normalization or autoscaling) to metabolite values.
 }

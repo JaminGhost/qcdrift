@@ -4,12 +4,21 @@
 \alias{process_runs}
 \title{Process Mass Spectrometry Data and Generate QC Plots}
 \usage{
-process_runs(filepath, sheet_name = 1)
+process_runs(
+  filepath,
+  sheet_name = 1,
+  correction_function = correct_linear,
+  norm_method = "tsn"
+)
 }
 \arguments{
 \item{filepath}{The path to the Excel file containing the raw mass spectrometry data.}
 
 \item{sheet_name}{The name or index of the sheet to process within the Excel file. Default is 1.}
+
+\item{correction_function}{The function to use for drift correction. Default is \code{correct_linear}, which performs linear interpolation between QC samples.}
+
+\item{norm_method}{The method to use for normalization. Default is 'tsn' (Total Sum Normalization), but can also be set to 'auto' for autoscaling (Z-score normalization).}
 }
 \value{
 A list containing two main elements:

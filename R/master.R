@@ -15,7 +15,6 @@
 #'   \item{plots}{A list of ggplot2 objects for quality control analysis,
 #'     including PCA plots, CV plots, violin plots, and heatmaps.}
 #'
-#' @importFrom dplyr group_by mutate ungroup summarise left_join
 #' @importFrom patchwork plot_annotation
 #'
 #' @export
@@ -28,19 +27,8 @@ process_runs <- function(filepath, sheet_name=1, correction_function = correct_l
   # 2. DRIFT CORRECTION
   long_corrected <- qc_drift_correction(long_data)
 
-  # 3. NORMALIZE (TSN)
-  sample_sums <- long_corrected |>
-    dplyr::group_by(sample) |>
-    dplyr::summarise(total_sum = sum(corrected_abundance, na.rm=TRUE), .groups = "drop")
-
-  long_scaled <- long_corrected |>
-    dplyr::left_join(sample_sums, by="sample") |>
-    dplyr::group_by(metabolites) |>
-    dplyr::mutate(
-      norm = corrected_abundance / total_sum,
-      scaled_abundance = norm * mean(corrected_abundance, na.rm=TRUE)
-    ) |>
-    dplyr::ungroup()
+  # 3. NORMALIZE
+  long_scaled <- normalize_data(long_corrected, method = norm_method)
 
   # 4. PLOT GENERATION
   pca_raw    <- run_pca(long_data, abundance)
