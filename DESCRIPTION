@@ -1,0 +1,30 @@
+Package: qcdrift
+Type: Package
+Title: QC Correction 
+Version: 0.1.0
+Authors@R: c(
+    person(given ="Jamilet", 
+           family = "Cordon",
+           role = "aut",
+           email = " cordon.jc@gmail.com"),
+    person(given = "Randy",
+           family = "Johnson",
+           role = c("aut", "cre"),
+           email = "johnson@hood.edu"))
+Description: This package takes raw mass spec values undergoing QC drift effect and caculates the QC corrected values from the inital raw mas spec values. Also included are plotting fucntions to evaluate QC drift and correction.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    dplyr,
+    GGally,
+    ggplot2,
+    ggrepel,
+    patchwork,
+    readxl,
+    stats,
+    tidyr
+Suggests:
+    testthat
