@@ -1,18 +1,39 @@
 # functions for correcting qc drift
 
-#' Linearly Correct for QC Drift
+#' Correct for QC Drift
+#' @rdname qc_drift_correction
 #'
-#' @description This function corrects for analytical drift in mass spectrometry data
+#' @param raw_data A data frame containing the raw mass spectrometry data with columns for injection order (`io`), abundance (`abundance`), and a logical column indicating QC samples (`qc`).
+#' @param correction_function A function to apply for drift correction. Currently, the only supported function is `correct_linear`, which performs linear interpolation between QC samples.
+#' @param io A vector indicating injection order
+#' @param abundance A vector of uncorrected abundances
+#' @param qc A logical vector indicating QC samples
+#' @param metabolites A vector identifying each metabolite
+#'
+#' @description These functions apply a correction for analytical drift in mass spectrometry data.
+#' They assume that `raw_data` has appropriate columns for the chosen correction function.
+#' 
+#' `correct_linear` corrects for analytical drift in mass spectrometry data
 #' by linearly interpolating between QC samples. It assumes that the first and
 #' last samples are QC samples.
-#'
-#' @param io Numeric vector indicating injection order.
-#' @param abundance Numeric vector containing uncorrected abundances.
-#' @param qc Logical vector identifying QC samples.
-#'
-#' @return A numeric vector of QC-corrected abundances.
+#' 
+#' @return `qc_drift_correction` returns a data frame with an additional column, `corrected_abundance`, containing the QC-corrected abundances returned by `correction_function`.
+#' 
 #' @export
-correct_linear <- function(io, abundance, qc)
+#' @importFrom dplyr group_by mutate ungroup
+qc_drift_correction <- function(raw_data, correction_function = correct_linear, ...)
+{
+  corrected_data <- group_by(raw_data, metabolites) |>
+    mutate(corrected_abundance = correction_function(io, abundance, qc)) |>
+    ungroup()
+
+  return(corrected_data)
+}
+
+#' @rdname qc_drift_correction
+#'
+#' @export
+correct_linear <- function(io, abundance, qc, metabolites)
 {
   # assume io, abundance, and qc are of equal length from a data.frame
   if(length(io) != length(abundance) | length(abundance) != length(qc))

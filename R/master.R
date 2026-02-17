@@ -6,6 +6,8 @@
 #'
 #' @param filepath The path to the Excel file containing the raw mass spectrometry data.
 #' @param sheet_name The name or index of the sheet to process within the Excel file. Default is 1.
+#' @param correction_function The function to use for drift correction. Default is `correct_linear`, which performs linear interpolation between QC samples.
+#' @param norm_method The method to use for normalization. Default is 'tsn' (Total Sum Normalization), but can also be set to 'auto' for autoscaling (Z-score normalization).
 #'
 #' @return A list containing two main elements:
 #'   \item{data}{A list of data frames: `raw` (the initial cleaned data),
@@ -17,16 +19,14 @@
 #' @importFrom patchwork plot_annotation
 #'
 #' @export
-process_runs <- function(filepath, sheet_name=1) {
+process_runs <- function(filepath, sheet_name=1, correction_function = correct_linear,
+                         norm_method = 'tsn') {
 
   # 1. READ & CLEAN
   long_data <- read_and_clean_data(filepath, sheet_name)
 
   # 2. DRIFT CORRECTION
-  long_corrected <- long_data |>
-    dplyr::group_by(metabolites) |>
-    dplyr::mutate(corrected_abundance = correct_linear(io, abundance, qc)) |>
-    dplyr::ungroup()
+  long_corrected <- qc_drift_correction(long_data)
 
   # 3. NORMALIZE (TSN)
   sample_sums <- long_corrected |>
