@@ -6,6 +6,7 @@ format: gfm
 ```{r}
 #| echo: false
 #| setup: true
+#| message: false
 
 # load the current working version of the package to render the documentation and run the example pipeline.
 devtools::load_all()

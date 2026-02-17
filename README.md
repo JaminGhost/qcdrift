@@ -1,8 +1,6 @@
 # qcdrift: Automated QC Drift Correction for Metabolomics
 
 
-    ℹ Loading qcdrift
-
 The `qcdrift` package is an R-based analytical framework designed to
 automate the detection, correction, and validation of instrumental drift
 in high-dimensional mass spectrometry data. It replaces labor-intensice
