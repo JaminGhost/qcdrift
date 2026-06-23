@@ -1,0 +1,186 @@
+---
+title: "qcdrift: Comprehensive Line-by-Line Technical Manual and Tutorial"
+author: "Jamilet Cordon"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{qcdrift-extended-guide}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## 1. Complete Chronological Data Lifecycle Architecture
+
+This tutorial details exactly how high-dimensional mass spectrometry data moves through the `qcdrift` package. Rather than treating functions as isolated wrappers, this guide shows you how your data frame changes shape, column names, and numeric states across every file module in the repository.
+
+------------------------------------------------------------------------
+
+## 2. Exhaustive File-by-File Technical Deep Dive
+
+### 2.1 `read.R` - Data Ingestion & Structural Alignment
+
+**Primary Function:** `read_and_clean_data(filepath, sheet_name = 1, qc_starts_with = "QC")`
+
+This file handles initial data loading, coordinate transformations, and primary key validation.
+
+-   **Line-by-Line Mechanics:**
+    -   **`injection_orders <- as.numeric(full_data[1, -1])`**: Extracts the very first row across all sample columns (dropping index 1) and saves it as a clean numeric tracking vector representing the sequential timeline ($io$) of the mass spectrometer run.
+    -   **`full_data <- full_data[-1, ]`**: Strips that tracking header out of the data frame to keep it from corrupting your numerical abundance calculations.
+    -   **`names(full_data)[1] <- "metabolites"`**: Re-indexes the first column to establish a explicit primary key identifier for the molecular features.
+    -   **`full_data$metabolites[...] <- paste(...)`**: Checks for duplicate row entries where a metabolite appears multiple times due to different peak fragments or isomers. It dynamically appends unique trailing suffix tracking flags (e.g., `_1`, `_2`) so rows are never accidentally squashed or lost.
+    -   **`pivot_longer(full_data, -1, names_to = "sample", values_to = "abundance")`**: Transposes the wide matrix grid into a deep, long 3-column layout, making it instantly compatible with fast vector calculations.
+    -   **`mutate(..., qc = grepl(paste0("^", qc_starts_with), sample))`**: Evaluates string headers using regex matching to create a clean boolean column array (`TRUE`/`FALSE`) to isolate your validation standards.
+-   **What it Outputs:** A long-format tibble/data frame with exactly 5 tracking columns: `metabolites`, `sample`, `abundance`, `io`, and `qc`.
+-   **Troubleshooting & Modifications:** If your lab uses different file layouts, ensure that your row sequence numbers are located on line 1, and adapt the prefix argument (e.g., `qc_starts_with = "Pool"` or `"REF"`) to match your exact sample labeling convention.
+
+------------------------------------------------------------------------
+
+### 2.2 `qc_drift.R` - Piecewise Linear Signal Correction
+
+**Primary Functions:** `qc_drift_correction()` and `correct_linear()`
+
+This module isolates and tracks signal decay across runtime sequences by executing targeted calculations exclusively on quality control replicates.
+
+-   **Line-by-Line Mechanics:**
+    -   **`group_by(raw_data, metabolites)`**: Sub-segments your massive data frame by its feature keys, streaming each metabolite independently through the calculation loops.
+    -   **`qc_indeces <- (1:length(qc))[qc]`**: Identifies the exact row index locations where the `qc` boolean column matches `TRUE`.
+    -   **`retval[1] <- mean(abundance[qc_indeces], na.rm = TRUE)`**: Establishes your overall biological baseline target value by averaging the intensities of all QC controls across the entire dataset sequence.
+    -   **`for(i in 2:length(qc_indeces))`**: Loops sequentially through consecutive chronological pairs of your QC checkpoints (anchoring indices $a$ and $b$).
+    -   **`m <- (abundance[b] - abundance[a]) / (io[b] - io[a])`**: Calculates the precise localized linear slope ($m$) of signal decay between those two anchors: $$m = \frac{\text{Abundance}_b - \text{Abundance}_a}{io_b - io_a}$$
+    -   **`pred_val <- (m * (x - io[a]) + abundance[a])`**: Extrapolates a unique, point-by-point predicted signal decay baseline for any biological samples sitting between those two QC points. To prevent division errors if a signal hits absolute zero, dropouts are caught and adjusted to `1e-9`.
+    -   **`retval[(a+1):b] <- abundance[(a+1):b] * (retval[1] / pred_val)`**: Adjusts the raw intensities by multiplying them by the scalar fraction (`Global Mean / Predicted Value`), shifting the attenuated signal cleanly back up to the true baseline.
+-   **What it Outputs:** A tidy long data frame with an appended `corrected_abundance` column, containing values fully adjusted for instrument drift.
+-   **Troubleshooting & Modifications:** If a feature has fewer than 2 valid QC points, the code throws a warning and skips the calculation for that molecule. This protects your downstream matrix from division-by-zero math errors.
+
+------------------------------------------------------------------------
+
+### 2.3 `normalize.R` - Multi-Method Matrix Normalization
+
+**Primary Function:** `normalize_data(corrected_data, method = "tsn")`
+
+This file eliminates variations caused by physical differences in extraction volumes or sample dilutions by applying matrix-wide calculations across sample columns.
+
+-   **Line-by-Line Mechanics:**
+    -   **`pivot_wider(id_cols = metabolites, ...)`**: Temporarily reconstructs your dataset back into a wide cross-tabulated matrix format to run calculations across columns.
+    -   **The Total Sum Normalization (`tsn`) Path:**
+        -   `col_sums <- apply(corrected_wide, 2, sum, na.rm = TRUE)`: Sums every single row value within a column to determine the total signal volume for each individual sample injection.
+        -   `norm_by_sum <- sweep(corrected_wide, 2, col_sums, "/")`: Divides every cell by its corresponding sample column total, scaling intensities into clean fractions of total abundance to remove dilution differences.
+        -   `scaled_data <- sweep(norm_by_sum, 1, row_means, FUN = "*")`: Multiplies features back across rows by their historical mean values, keeping data points in an easily interpretable biological concentration range.
+    -   **The Autoscaling (`auto`) Path:**
+        -   `scale(t(corrected_wide), center = TRUE, scale = TRUE)`: Transposes the sample coordinates and calculates classic standard Z-scores ($Z = \frac{x - \mu}{\sigma}$). Centering shifts the mean of each feature array to exactly zero, while scaling divides by its standard deviation to establish unit variance. This ensures that large-magnitude signals do not overwhelm smaller biological variations in downstream multivariate models.
+-   **What it Outputs:** A tidy long data frame containing an appended column named `scaled_abundance` holding your fully normalized intensities.
+
+------------------------------------------------------------------------
+
+### 2.4 `pca.R` - Multidimensional Dimension Reduction
+
+**Primary Function:** `run_pca(data, vbl)`
+
+This module prepares your data and evaluates your global variance layout using principal component scores.
+
+-   **Line-by-Line Mechanics:**
+    -   **`vars <- apply(mat, 2, var, na.rm=TRUE)`**: Iterates across wide sample grids to calculate the exact statistical variance of each feature vector.
+    -   **`mat <- mat[, vars > 0 & !is.na(vars), drop=FALSE]`**: **The critical safety checker filter.** It scans the data matrix and completely strips out flat, unchanging features or constant dropouts. This explicitly prevents the singular value decomposition engine from running into division-by-zero failures or causing R to crash during matrix derivation.
+    -   **`prcomp(mat, center = TRUE, scale. = TRUE)`**: Projects high-dimensional feature variables into clean, orthogonal principal components ($PC_1, PC_2, \dots$).
+-   **What it Outputs:** A standard `prcomp` class list object containing coordinate projections ($x$), rotation weights, and standard deviation eigenvalues.
+
+------------------------------------------------------------------------
+
+### 2.5 `plots.R` - Diagnostic Quality Assurance Visuals
+
+**Primary Functions:** `generate_pca_plot()`, `generate_cv_plot()`, `generate_qc_violin()`, and `generate_qc_heatmap()`
+
+This module isolates and visualizes your pipeline results using targeted `ggplot2` charts.
+
+-   **Line-by-Line Mechanics & Interpretations:**
+    -   **`generate_pca_plot()`**: Maps principal component coordinates ($PC_1$ vs $PC_2$). If your correction worked properly, your blue reference QC injections will cluster tightly together on the screen.
+    -   **`generate_cv_plot()`**: Calculates precision metrics across replicates ($\%CV = \frac{\sigma}{\mu} \times 100$) and draws a clear horizontal dashed line at the **20%** mark. This allows you to instantly flag any unstable features.
+    -   **`generate_qc_violin()`**: Visualizes data distributions across the timeline using a standard log10 transform, allowing you to instantly check that median values remain aligned.
+    -   **`generate_qc_heatmap()`**: Renders a Z-score intensity matrix layout along your injection sequence. Successful processing is confirmed when all systematic artifact patterns or vertical bands are gone.
+-   **What it Outputs:** Complete, publication-ready `ggplot2` visual objects.
+
+------------------------------------------------------------------------
+
+### 2.6 `master.R` - Monolithic Automation Pipeline Orchestration
+
+**Primary Function:** `process_runs(filepath, sheet_name = 1, norm_method = "tsn", qc_starts_with = "QC")`
+
+-   **What it does:** This is the master coordinator script. Instead of forcing users to execute steps manually, it handles the complete sequential data stream in memory behind the scenes.
+-   **How it connects your files:**
+    1.  It calls `read_and_clean_data()` (`read.R`) to ingest and structure the file.
+    2.  It passes that structured output straight into `qc_drift_correction()` (`qc_drift.R`) to remove runtime bias.
+    3.  It routes the drift-corrected values directly to `normalize_data()` (`normalize.R`) to handle sample dilutions.
+    4.  It passes the final matrices into your `run_pca()` (`pca.R`) and plotting functions (`plots.R`).
+-   **What it Outputs:** A comprehensive master tracking list containing sub-elements `$data$raw`, `$data$corrected`, `$data$scaled`, and your full collection of diagnostic plots inside `$plots`.
+
+------------------------------------------------------------------------
+
+## 3. Post-Analysis Processing & Exporting
+
+Once data processing wraps up, you can easily pull your cleaned long tables out of R and write them back onto your local storage disk as standard CSV spreadsheets:
+
+```{r step6-export, eval=FALSE}
+# Extract your fully processed data frame from the pipeline output list
+clean_matrix <- normalized_data
+
+# Write results to disk as a clean, shareable CSV spreadsheet file
+write.csv(
+  clean_matrix, 
+  file = "outputs/normalized_metabolomics_results.csv", 
+  row.names = FALSE
+)
+```
+
+------------------------------------------------------------------------
+
+## 4. End-to-End Chronological Tutorial Workspace
+
+Copy this template into your workspace, define your local file targets, and run your pipeline components end-to-end.
+
+```{r dynamic-execution, message=FALSE, warning=FALSE, eval=FALSE}
+library(devtools)
+load_all()
+
+# 1. Define the path to your real experimental Excel file
+real_data_path <- "inst/extdata/RawMassSpec.xlsx"
+
+# 2. Establish dynamic file and processing parameters
+target_sheet <- 1           # Target tab index or name
+qc_prefix    <- "QC"        # Label flag pattern for QC references
+norm_choice  <- "tsn"       # Normalization calculation ("tsn" or "auto")
+
+# 3. Step-by-Step Chronological Pipeline Execution
+# Step A: Load, clean, and transpose raw files
+raw_data <- read_and_clean_data(
+  filepath = real_data_path, 
+  sheet_name = target_sheet, 
+  qc_starts_with = qc_prefix
+)
+
+# Step B: Model and eliminate time-dependent analytical drift
+corrected_data <- qc_drift_correction(raw_data)
+
+# Step C: Normalize values to handle physical sample dilution variances
+normalized_data <- normalize_data(corrected_data, method = norm_choice)
+
+# 4. Generate Diagnostic Visual Controls
+pca_output <- run_pca(data = normalized_data, vbl = scaled_abundance)
+pca_plot   <- generate_pca_plot(pcs = pca_output, title_prefix = "Onboarding Guide")
+cv_plot    <- generate_cv_plot(data = normalized_data, vbl = scaled_abundance)
+
+print(pca_plot)
+print(cv_plot)
+
+# 5. Save Finished Deliverables Back to Local Disk Storage
+write.csv(
+  normalized_data, 
+  file = "outputs/normalized_metabolomics_results.csv", 
+  row.names = FALSE
+)
+```
