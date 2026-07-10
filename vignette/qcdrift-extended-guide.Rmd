@@ -185,196 +185,247 @@ write.csv(
 )
 ```
 
-[**02JUL26 Updates:**]{.underline}
+# Complete-step-by-step-pipeline
 
--   auto normalize.R data ( check to see how it's read in first) note: remove auto. allow for user choice
+#### *Global Pipeline Architecture*
 
--   visual - text (r-code)
+High-dimensional mass spectrometry (MS) datasets are inherently prone to systematic artifacts. These are caused by target signal dropouts (analytical drift) over long injection sequences and sample concentration variances (dilution effects). The qcdrift package resolves these variations using a chronological, modular processing layout.
 
--   example data in tutorial
+#### STEP 1: Environment Initialization & Parameter Configuration
 
-```{r complete-step-by-step-pipeline, eval=FALSE}
-# ==============================================================================
-# STEP 1: Environment Initialization & Parameter Configuration
-# 
-# What It Is:   Prepares your workspace and sets project variables.
-# Why It Is:    To attach source code modifications directly from your development 
-#               folders into active memory without requiring a full reinstall.
-# What It Does: Loads essential developer packages, attaches package functions, 
-#               and establishes file targets and naming prefixes.
-#
-# VARIABLE DIRECTORY:
-# * real_data_path (String): The absolute or relative local system file path targeting the input Excel workbook.
-# * target_sheet (Numeric/String): The discrete tab position index or sheet name where the raw matrix resides.
-# * qc_prefix (String): The regular expression text pattern used to match and label instrument quality control injections.
-# * norm_choice (String): The character key toggling between "tsn" (Total Sum Normalization) and "auto" (Autoscaling). 
-# ==============================================================================
+-   ***What It Is***: Prepares your workspace and sets project variables.
+
+-   ***Why It Is:*** To attach source code modifications directly from your development folders into active memory without requiring a full reinstall.
+
+-   ***What It Does***: Loads essential developer packages, attaches package functions,and establishes file targets and naming prefixes.
+
+**VARIABLE DIRECTORY:**
+
+-   **target_sheet (Numeric/String)**: The discrete tab position index or sheet name where the raw matrix resides.
+
+-   **qc_prefix (String)**: The regular expression text pattern used to match and label instrument quality control injections.
+
+-   **norm_choice (String)**: USER CHOICE - Set to "tsn" for Total Sum Normalization or "auto" for Autoscaling (Z-scores).
+
+```{r STEP 1, eval=FALSE}
 
 library(devtools)
 load_all()
 
 # Establish localized parameters matching your experimental design
-real_data_path <- "inst/extdata/RawMassSpec.xlsx"
 target_sheet   <- 1           
 qc_prefix      <- "QC"        
-norm_choice    <- "tsn"       
 
+# DYNAMIC USER CHOICE: Set to "tsn" for Total Sum Normalization or "auto" for Autoscaling
+norm_choice    <- "tsn"
 
-# ==============================================================================
-# STEP 2: Data Ingestion & Structural Realignment (R/read.R)
-# 
-# What It Is:   The parsing gateway that reads raw spreadsheets into memory.
-# Why It Is:    Raw mass spec outputs are wide grids that prevent efficient 
-#               row-by-row matrix algebra, splitting, or time-series tracking.
-# What It Does: Extracts runtime sequence orders (io), uses regular expressions 
-#               to flag validation standards (qc), uniquely appends suffixes to 
-#               duplicate features, and reshapes data into a 5-column long tibble.
-#
-# VARIABLE DIRECTORY:
-# * filepath, sheet_name, qc_starts_with (Arguments): Internal function entry boundaries mapping straight to your step 1 parameters.
-# * injection_orders (Numeric Vector): Extracted from row 1; maps the run sequence order (the independent time variable, io).
-# * full_data (Data Frame): The core matrix. It begins as a wide grid, gets its top row stripped, gets its primary key column named, and mutates dynamically.
-# * raw_data (Data Frame): The final returned tidy long-format table outputted by this file module.
-# ==============================================================================
+```
 
-raw_data <- read_and_clean_data(
-  filepath       = real_data_path, 
-  sheet_name     = target_sheet, 
-  qc_starts_with = qc_prefix
+#### STEP 1B: Bundled Example Data Configuration
+
+-   ***What It Is***: Locates the built-in system file package example.
+
+-   ***Why It Is*****:** Instead of hardcoding a local desktop file path (which will break on a colleague's computer), system.file() finds the absolute path inside the installed package environment dynamically.
+
+-   ***What It Does***: Searches your package data directory for "RawMassSpec.xlsx", verifies its installation presence, and returns a local system string path that read_and_clean_data() can instantly ingest.
+
+**VARIABLE DIRECTORY:**
+
+-   **real_data_path (String) :** Dynamically resolved absolute local file path tageting the embedded spreadsheet.
+
+```{r STEP 1, eval=FALSE}
+# Dynamically locate the embedded Excel file within the installed package
+real_data_path <- system.file(
+  "extdata", 
+  "RawMassSpec.xlsx", 
+  package = "qcdrift"
 )
+
+# Safety Validation Check: Ensure the file was actually found by R
+if (real_data_path == "") {
+  stop("Example file 'RawMassSpec.xlsx' not found inside inst/extdata/. Check your package structure!")
+}
+
+```
+
+#### STEP 2: Data Ingestion & Structural Realignment (R/read.R)
+
+-   ***What It Is*****:** The parsing gateway that reads raw spreadsheets into memory.
+
+-   ***Why It Is***: Raw mass spec outputs are wide grids that prevent efficient vector calculations or time-series tracking. This module structures data for downstream processing.
+
+-   ***What It Does***: Extracts runtime sequence orders (io), uses regular expressions to flag validation standards (qc), uniquely appends suffixes to duplicate features, and reshapes data into a 5-column long tibble.
+
+**VARIABLE DIRECTORY:**
+
+-   **real_data_path (String) :** Dynamically resolved absolute local file path tageting the embedded spreadsheet.
+
+-   **filepath, sheet_name, qc_starts_with (Arguments):** Internal function entry boundaries mapping straight to your step 1 parameters.
+
+-   **injection_orders (Numeric Vector):** Extracted from row 1; maps the run sequence order (the independent time variable, io).
+
+-   **full_data (Data Frame):** The core matrix. It begins as a wide grid, gets its top row stripped, gets its primary key column named, and mutates dynamically.
+
+-   **raw_data (Data Frame):** The final returned tidy long-format table outputted by this file module.
+
+```{r STEP2, eval=FALSE}
+# Run data ingestion using your verified package data path
+raw_data <- read_and_clean_data( filepath = real_data_path, sheet_name = target_sheet, qc_starts_with = qc_prefix )
 
 # Inspection Checklist: Verify the long matrix coordinate structure
-print("Ingestion Complete. Structural Coordinates:")
-print(head(raw_data))
 
+print("Ingestion Complete. Structural Coordinates:") print(head(raw_data))
+```
 
-# ==============================================================================
-# STEP 3: Piecewise Linear Baseline Drift Correction (R/qc_drift.R)
-# 
-# What It Is:   The chronological segment-by-segment interpolation engine.
-# Why It Is:    To eliminate systematic baseline signal decay caused by natural 
-#               instrument attenuation, source fouling, and column degradation.
-# What It Does: Groups data by feature, calculates baseline reference means, 
-#               tracks interpolation slopes (m) between chronological check pairs, 
-#               and scales attenuated values back up to match your global target.
-#
-# VARIABLE DIRECTORY:
-# * metabolites (Primary Key Factor): The grouping variable that acts as a split-apply-combine partition.
-# * qc_indeces (Numeric Vector): Holds the exact coordinate positions along the timeline where the 'qc' variable equals TRUE.
-# * retval (Numeric Vector): An internal tracking collector array initialized to gather and transform feature values.
-# * retval[1] (Numeric Scalar): The global baseline concentration target calculated as the mean intensity of all valid QCs.
-# * a, b (Loop Anchors): The index markers representing the boundaries of the current localized segment window.
-# * m (Numeric Scalar): The calculated localized linear slope of signal decay across the current window segment.
-# * pred_val (Numeric Vector): The extrapolated baseline attenuation line value calculated for samples running between anchors.
-# * corrected_data (Data Frame): The returned table with an appended column containing values adjusted for instrument drift.
-# ==============================================================================
+#### STEP 3: Piecewise Linear Baseline Drift Correction (R/qc_drift.R)
 
-corrected_data <- qc_drift_correction(
-  raw_data            = raw_data,
-  correction_function = correct_linear
-)
+-   ***What It Is*****:** The chronological segment-by-segment interpolation engine.
+
+-   ***Why It Is*****:** To eliminate systematic baseline signal decay caused by natural instrument attenuation, source fouling, and column degradation
+
+-   ***What It Does*****:** Groups data by feature, calculates baseline reference means, tracks interpolation slopes (m) between chronological check pairs, and scales attenuated values back up to match your global target.
+
+**VARIABLE DIRECTORY:**
+
+-   **metabolites (Primary Key Factor):** The grouping variable that acts as a split-apply-combine partition.
+
+-   **qc_indeces (Numeric Vector):** Holds the exact coordinate positions along the timeline where the 'qc' variable equals TRUE.
+
+-   **retval (Numeric Vector):** An internal tracking collector array initialized to gather and transform feature values.
+
+-   **retval[1] (Numeric Scalar):** The global baseline concentration target calculated as the mean intensity of all valid QCs.
+
+-   **a, b (Loop Anchors):** The index markers representing the boundaries of the current localized segment window.
+
+-   **m (Numeric Scalar):** The calculated localized linear slope of signal decay across the current window segment.
+
+-   **pred_val (Numeric Vector):** The extrapolated baseline attenuation line value calculated for samples running between anchors.
+
+-   **corrected_data (Data Frame):** The returned table with an appended column containing values adjusted for instrument drift.
+
+```{r}
+
+corrected_data <- qc_drift_correction( raw_data = raw_data, correction_function = correct_linear )
+
 
 # Inspection Checklist: Confirm 'corrected_abundance' vector is appended
-print("Drift Correction Complete. Calibrated Matrix:")
-print(head(corrected_data))
 
+print("Drift Correction Complete. Calibrated Matrix:") print(head(corrected_data))
 
-# ==============================================================================
-# STEP 4: Sample-Level Loading & Dilution Normalization (R/normalize.R)
-# 
-# What It Is:   A sample sweeping normalization and matrix alignment tool.
-# Why It Is:    To account for physical differences in initial pipetting steps, 
-#               sample volume changes, and physical dilution artifacts.
-# What It Does: Reconstructs a wide cross-tabulated layout, runs column sums to 
-#               measure loading variances, divides cells by totals to create 
-#               volume fractions, and multi-scales back by feature averages.
-#
-# VARIABLE DIRECTORY:
-# * method (Argument): Internal toggle routing execution logic down either the total sum or autoscale calculation pathways.
-# * corrected_wide (Matrix): Temporary data frame storing feature variables as rows and sample sequences as columns.
-# * col_sums (Numeric Vector): Tracks total cumulative ion intensity per column, quantifying dilution variance per sample injection.
-# * norm_by_sum (Matrix): Intermediate array where columns represent normalized fractions of total abundance.
-# * row_means (Numeric Vector): Holds the baseline average concentration of each feature row across all injections.
-# * scaled_data (Matrix/Wide): Wide format array containing fully normalized, concentration-corrected measurements.
-# * normalized_data (Data Frame): Final long-format output data table containing your stabilized concentration variables.
-# ==============================================================================
+```
 
-Dat_norm <- normalize_data(
-  corrected_data = corrected_data, 
-  method         = norm_choice
-)
+#### STEP 4: Sample-Level Loading & Dilution Normalization (R/normalize.R)
+
+-   ***What It Is*****:** A sample sweeping normalization and matrix alignment tool.
+
+-   ***Why It Is*****:** To account for physical differences in initial pipetting steps, sample volume changes, and physical dilution artifacts.
+
+-   ***What It Does*****:** Reconstructs a wide cross-tabulated layout, runs column sums to measure loading variances, divides cells by totals to create volume fractions, and multi-scales back by feature averages.
+
+**VARIABLE DIRECTORY:**
+
+-   **method (Argument):** Internal toggle routing execution logic down either the total sum or autoscale calculation pathways.
+
+-   **corrected_wide (Matrix):** Temporary data frame storing feature variables as rows and sample sequences as columns.
+
+-   **col_sums (Numeric Vector):** Tracks total cumulative ion intensity per column, quantifying dilution variance per sample injection.
+
+-   **norm_by_sum (Matrix):** Intermediate array where columns represent normalized fractions of total abundance.
+
+-   **row_means (Numeric Vector):** Holds the baseline average concentration of each feature row across all injections.
+
+-   **scaled_data (Matrix/Wide):** Wide format array containing fully normalized, concentration-corrected measurements.
+
+-   **normalized_data (Data Frame):** Final long-format output data table containing your stabilized concentration variables.
+
+```{r}
+
+normalized_data <- normalize_data( corrected_data = corrected_data, method = norm_choice )
 
 # Inspection Checklist: Audit overall statistical data ranges
-print("Matrix Normalization Complete. Summary Metrics:")
-summary(normalized_data$scaled_abundance)
+
+print("Matrix Normalization Complete. Summary Metrics:") summary(normalized_data$scaled_abundance)
 
 
-# ==============================================================================
-# STEP 5: Multidimensional Dimension Reduction & PCA Auditing (R/pca.R)
-# 
-# What It Is:   An orthogonal singular value decomposition compression script.
-# Why It Is:    To reduce massive variable grids into clear variance vectors, 
-#               while applying defensive filters to keep the math from crashing.
-# What It Does: Evaluates variable-by-variable variance, completely strips out 
-#               zero-variance flat lines or constant dropouts (vars > 0), and 
-#               computes filtered principal components without software crashes.
-#
-# VARIABLE DIRECTORY:
-# * data, vbl (Arguments): Map the input table and targets variable column (scaled_abundance) down to the logic engine.
-# * mat (Matrix): A temporary internal sample-by-feature wide coordinate grid generated for standard multidimensional calculations.
-# * vars (Numeric Vector): Stores the variance value calculated for each metabolite across all batch runs.
-# * pca_output (List/prcomp Object): The returned list array holding component rotation weights, standard deviation eigenvalues, and coordinate scores.
-# ==============================================================================
+```
+
+#### STEP 5: Multidimensional Dimension Reduction & PCA Auditing (R/pca.R)
+
+-   ***What It Is*****:** An orthogonal singular value decomposition compression script.
+
+-   ***Why It Is*****:** To reduce massive variable grids into clear variance vectors,while applying defensive filters to keep the math from crashing.
+
+-   ***What It Does*****:** Evaluates variable-by-variable variance, completely strips out zero-variance flat lines or constant dropouts (vars \> 0), and computes filtered principal components without software crashes.
+
+**VARIABLE DIRECTORY:**
+
+-   **data, vbl (Arguments):** Map the input table and targets variable column (scaled_abundance) down to the logic engine.
+
+-   **mat (Matrix):** A temporary internal sample-by-feature wide coordinate grid generated for standard multidimensional calculations.
+
+-   **vars (Numeric Vector):** Stores the variance value calculated for each metabolite across all batch runs.
+
+-   **pca_output (List/prcomp Object):** The returned list array holding component rotation weights, standard deviation eigenvalues, and coordinate scores.
+
+```{r}
 
 pca_output <- run_pca(
   data = normalized_data, 
   vbl  = scaled_abundance
 )
 
+```
 
-# ==============================================================================
-# STEP 6: Diagnostic Visual Control Rendering (R/plots.R)
-# 
-# What It Is:   An automated validation suite built on top of ggplot2.
-# Why It Is:    To yield clear visual indicators proving technical artifact 
-#               removal while verifying that true biological signal was preserved.
-# What It Does: Generates score plots tracking sample groupings and precision 
-#               distribution profiles relative to a horizontal 20% limit bar.
-#
-# VARIABLE DIRECTORY:
-# * pcs (Argument): Entry gate accepting the prcomp list object to extract spatial coordinates.
-# * title_prefix (String): Sets text labels on chart titles to differentiate tutorial stages.
-# * pca_plot (ggplot Object): High-resolution plot coordinate mapping principal component scores.
-# * cv_plot (ggplot Object): Precision waterfall plot checking feature reproducibility against standard thresholds.
-# ==============================================================================
+#### STEP 6: Diagnostic Visual Control Rendering (R/plots.R)
 
-pca_plot <- generate_pca_plot(pcs = pca_output, title_prefix = "Workspace Tutorial")
-cv_plot  <- generate_cv_plot(data = normalized_data, vbl = scaled_abundance)
+-   ***What It Is*****:** An automated validation suite built on top of ggplot2.
+
+-   ***Why It Is*****:** To yield clear visual indicators proving technical artifact removal while verifying that true biological signal was preserved.
+
+-   ***What It Does*****:** Generates score plots tracking sample groupings and precision distribution profiles relative to a horizontal 20% limit barm
+
+**VARIABLE DIRECTORY:**
+
+-   **pcs (Argument):** Entry gate accepting the prcomp list object to extract spatial coordinates.
+
+-   **title_prefix (String):** Sets text labels on chart titles to differentiate tutorial stages.
+
+-   **pca_plot (ggplot Object):** High-resolution plot coordinate mapping principal component scores.
+
+-   **cv_plot (ggplot Object):** Precision waterfall plot checking feature reproducibility against standard thresholds.
+
+```{r}
+pca_plot <- generate_pca_plot(pcs = pca_output, title_prefix = "Workspace Tutorial") 
+cv_plot <- generate_cv_plot(data = normalized_data, vbl = scaled_abundance)
 
 # Display charts immediately on your active RStudio plotting frame panel
-print(pca_plot) 
-print(cv_plot)  
 
+print(pca_plot) print(cv_plot)
+```
 
-# ==============================================================================
-# STEP 7: Local Disk Export & Delivery (R/utils.R)
-# 
-# What It Is:   The final analytical dataset file extraction command.
-# Why It Is:    To unpack finished matrix data arrays out of temporary R session 
-#               memory, converting them into standard formats for downstream work.
-# What It Does: Writes tidy, drift-corrected, and sum-scaled long matrices into 
-#               a reproducible, shareable row-by-row spreadsheet table.
-#
-# VARIABLE DIRECTORY:
-# * file (Argument): Sets the targeting name and system location for the exported document.
-# * row.names (Logical): Boolean flag preventing R from appending an extra unnamed row index sequence column to the file.
-# ==============================================================================
+#### STEP 7: Local Disk Export & Delivery (R/utils.R)
 
-write.csv(
-  normalized_data, 
-  file      = "outputs/normalized_metabolomics_results.csv", 
-  row.names = FALSE
-)
+-   ***What It Is*****:** The final analytical dataset file extraction command.
 
-print("Pipeline Finished Successfully! Deliverable spreadsheet saved to outputs/ folder.")
+-   ***Why It Is*****:** To unpack finished matrix data arrays out of temporary R session memory, converting them into standard formats for downstream work.
+
+-   ***What It Does*****:** Writes tidy, drift-corrected, and sum-scaled long matrices into a reproducible, shareable row-by-row spreadsheet table
+
+**VARIABLE DIRECTORY:**
+
+-   **file (Argument):** Sets the targeting name and system location for the exported document.
+
+-   **row.names (Logical):** Boolean flag preventing R from appending an extra unnamed row index sequence column to the file.
+
+```{r}
+# Create the outputs directory if it does not exist yet
+
+if (!dir.exists("outputs")) { dir.create("outputs") }
+
+# Export long array matrix to local storage path
+
+write.csv( normalized_data, file = "outputs/normalized_metabolomics_results.csv", row.names = FALSE )
+
+print("Pipeline Finished Successfully! Deliverable spreadsheet saved to outputs/ folder.") 
+
 ```
