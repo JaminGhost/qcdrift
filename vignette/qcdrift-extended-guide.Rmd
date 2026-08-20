@@ -292,7 +292,8 @@ raw_data <- read_and_clean_data( filepath = real_data_path, sheet_name = target_
 
 # Inspection Checklist: Verify the long matrix coordinate structure
 
-print("Ingestion Complete. Structural Coordinates:") print(head(raw_data))
+print("Ingestion Complete. Structural Coordinates:") 
+print(head(raw_data))
 ```
 
 #### STEP 3: Piecewise Linear Baseline Drift Correction (R/qc_drift.R)
@@ -328,7 +329,8 @@ corrected_data <- qc_drift_correction( raw_data = raw_data, correction_function 
 
 # Inspection Checklist: Confirm 'corrected_abundance' vector is appended
 
-print("Drift Correction Complete. Calibrated Matrix:") print(head(corrected_data))
+print("Drift Correction Complete. Calibrated Matrix:") 
+print(head(corrected_data))
 
 ```
 
@@ -362,7 +364,8 @@ normalized_data <- normalize_data( corrected_data = corrected_data, method = nor
 
 # Inspection Checklist: Audit overall statistical data ranges
 
-print("Matrix Normalization Complete. Summary Metrics:") summary(normalized_data$scaled_abundance)
+print("Matrix Normalization Complete. Summary Metrics:") 
+summary(normalized_data$scaled_abundance)
 
 
 ```
@@ -418,7 +421,8 @@ cv_plot <- generate_cv_plot(data = normalized_data, vbl = scaled_abundance)
 
 # Display charts immediately on your active RStudio plotting frame panel
 
-print(pca_plot) print(cv_plot)
+print(pca_plot) 
+print(cv_plot)
 ```
 
 #### STEP 7: Analytical Dataset Finalization (R/utils.R)
