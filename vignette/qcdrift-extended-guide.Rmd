@@ -19,6 +19,27 @@ knitr::opts_chunk$set(
 
 This tutorial details exactly how high-dimensional mass spectrometry data moves through the `qcdrift` package. Rather than treating functions as isolated wrappers, this guide shows you how your data frame changes shape, column names, and numeric states across every file module in the repository.
 
+### 1.1 Global Pipeline Architecture
+
+High-dimensional mass spectrometry (MS) data sets are inherently prone to systematic artifacts. These are caused by target signal dropouts (analytically drift) over long injection sequences and sample concentration variances (dilution effects). The 'qcdrift' package resolves these variation using a chronological, modular processing layout.
+
+```{text}
+
+[Raw Matrix Input Source]  --> Wide 2D Grid: Rows = Metabolites, Columns = Samples
+            │
+            ▼  EXECUTE: read_and_clean_data() inside R/read.R
+ [State 1: Long Tibble]    --> 5 Structured Columns: metabolite, sample, abundance, io, qc
+            │
+            ▼  EXECUTE: qc_drift_correction() inside R/qc_drift.R
+ [State 2: Calibrated Long]--> Appends calculated coordinate: corrected_abundance
+            │
+            ▼  EXECUTE: normalize_data() inside R/normalize.R
+ [State 3: Scaled Matrix]  --> Appends normalized coordinate: scaled_abundance
+            │
+            ▼  EXECUTE: run_pca() & generate_plots() inside R/pca.R & R/plots.R
+ [State 4: In-Memory Data] --> Fully calibrated, normalized tables & visual validation plots
+```
+
 ------------------------------------------------------------------------
 
 ## 2. Exhaustive File-by-File Technical Deep Dive
@@ -126,15 +147,12 @@ This module isolates and visualizes your pipeline results using targeted `ggplot
 Once data processing wraps up, you can easily pull your cleaned long tables out of R and write them back onto your local storage disk as standard CSV spreadsheets:
 
 ```{r step6-export, eval=FALSE}
-# Extract your fully processed data frame from the pipeline output list
-clean_matrix <- normalized_data
+# Extract your fully processed data frame into active workspace memory
+final_analytical_data <- normalized_data
 
-# Write results to disk as a clean, shareable CSV spreadsheet file
-write.csv(
-  clean_matrix, 
-  file = "outputs/normalized_metabolomics_results.csv", 
-  row.names = FALSE
-)
+# Inspect finalized dataset dimensions and structure
+print(dim(final_analytical_data))
+print(head(final_analytical_data))
 ```
 
 ------------------------------------------------------------------------
@@ -403,29 +421,27 @@ cv_plot <- generate_cv_plot(data = normalized_data, vbl = scaled_abundance)
 print(pca_plot) print(cv_plot)
 ```
 
-#### STEP 7: Local Disk Export & Delivery (R/utils.R)
+#### STEP 7: Analytical Dataset Finalization (R/utils.R)
 
--   ***What It Is*****:** The final analytical dataset file extraction command.
+-   ***What It Is*****:** The analytical dataset extraction and memory finalization module.
 
--   ***Why It Is*****:** To unpack finished matrix data arrays out of temporary R session memory, converting them into standard formats for downstream work.
+-   ***Why It Is*****:** To package the finished matrix data arrays directly inside the active R session, converting them into clean, structured formats ready for immediate downstream statistical modeling without writing intermediate files to disk.
 
--   ***What It Does*****:** Writes tidy, drift-corrected, and sum-scaled long matrices into a reproducible, shareable row-by-row spreadsheet table
+-   ***What It Does*****:**Isolates the stabilized concentration coordinates, verifies data matrix dimensions, and returns a finalized, reproducible long-format tibble ready for workspace analysis.
 
 **VARIABLE DIRECTORY:**
 
--   **file (Argument):** Sets the targeting name and system location for the exported document.
-
--   **row.names (Logical):** Boolean flag preventing R from appending an extra unnamed row index sequence column to the file.
+-   **final_analytical_data (Data Frame):** The primary long-format output data table storing finalized, drift-corrected, and normalized metabolite concentrations.
 
 ```{r}
-# Create the outputs directory if it does not exist yet
+# Extract the finalized analytical data frame in active session memory
+final_analytical_data <- normalized_data
 
-if (!dir.exists("outputs")) { dir.create("outputs") }
+# Inspection Checklist: Verify dimensions and preview final analytical coordinates
+print("Pipeline Processing Complete! Matrix Dimensions:")
+print(dim(final_analytical_data))
 
-# Export long array matrix to local storage path
-
-write.csv( normalized_data, file = "outputs/normalized_metabolomics_results.csv", row.names = FALSE )
-
-print("Pipeline Finished Successfully! Deliverable spreadsheet saved to outputs/ folder.") 
+print("Final Deliverable Matrix Coordinates:")
+print(head(final_analytical_data))
 
 ```
